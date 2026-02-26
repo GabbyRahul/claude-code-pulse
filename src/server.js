@@ -6,6 +6,18 @@ const { generateOptimizations } = require('./optimizer');
 function createServer() {
   const app = express();
 
+  // Restrict access to localhost origins only
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && !/^https?:\/\/localhost(:\d+)?$/.test(origin) && !/^https?:\/\/127\.0\.0\.1(:\d+)?$/.test(origin)) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    next();
+  });
+
   app.use(express.static(path.join(__dirname, 'public')));
 
   let cachedData = null;
