@@ -361,6 +361,31 @@
   .tab.active { color: var(--text); border-bottom-color: var(--accent); }
   .tab-content { display: none; }
   .tab-content.active { display: block; }
+
+  /* Best & Worst Sessions */
+  .best-worst-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 4px; }
+  @media (max-width: 600px) { .best-worst-grid { grid-template-columns: 1fr; } }
+  .bw-column-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .bw-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid;
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 8px;
+  }
+  .bw-card.best { border-left-color: var(--green); }
+  .bw-card.worst { border-left-color: var(--red); }
+  .bw-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+  .bw-badge.best { color: var(--green); }
+  .bw-badge.worst { color: var(--red); }
+  .bw-prompt { font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bw-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
+  .bw-stats { display: flex; gap: 14px; font-size: 11px; font-family: var(--mono); flex-wrap: wrap; }
+  .bw-stat { display: flex; flex-direction: column; gap: 1px; }
+  .bw-stat .val { color: var(--text); font-weight: 600; }
+  .bw-stat .lbl { color: var(--text-dim); }
+  .bw-reason { font-size: 11px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
 </style>
 </head>
 <body>
@@ -421,7 +446,11 @@
     <!-- Sessions tab -->
     <div class="tab-content" id="tab-sessions">
       <div class="section">
-        <div class="section-title">Sessions (sorted by tokens)</div>
+        <div class="section-title">Best &amp; Worst Sessions</div>
+        <div class="best-worst-grid" id="bestWorstGrid"></div>
+      </div>
+      <div class="section">
+        <div class="section-title">All Sessions (sorted by tokens)</div>
         <div class="table-container" id="sessionsTable"></div>
       </div>
     </div>
@@ -536,6 +565,7 @@ async function render(refresh = false) {
     renderHeatmap(data);
     renderCharts(data);
     renderProjects(data);
+    renderBestWorst(data);
     renderSessions(data);
     renderTools(data);
     renderOptimizations(data);
@@ -713,6 +743,74 @@ function renderProjects(data) {
   html += '</tbody></table>';
   html += '<div class="cost-note" style="margin-top:8px;">API-equivalent cost shown for reference only. Not your actual subscription cost.</div>';
   $('#projectsTable').innerHTML = html;
+}
+
+function scoreSession(s) {
+  if (s.totalTokens === 0) return 0;
+  const efficiency = s.outputTokens / s.totalTokens;
+  const cacheRatio = s.cacheReadTokens / s.totalTokens;
+  const toolPenalty = s.toolDensity;
+  return (efficiency * 0.5) + (cacheRatio * 0.3) - (toolPenalty * 0.05);
+}
+
+function sessionReason(s, isBest) {
+  const outputPct = s.totalTokens > 0 ? (s.outputTokens / s.totalTokens * 100).toFixed(0) : 0;
+  const cachePct = s.totalTokens > 0 ? (s.cacheReadTokens / s.totalTokens * 100).toFixed(0) : 0;
+  const density = s.toolDensity.toFixed(1);
+
+  if (isBest) {
+    if (cachePct > 60) return `${cachePct}% cache reuse — minimal re-reading, low overhead`;
+    if (outputPct > 20) return `${outputPct}% output ratio — Claude produced a lot per token spent`;
+    return `Balanced token use with ${density} tools/turn average`;
+  } else {
+    if (outputPct < 3) return `Only ${outputPct}% output ratio — mostly re-reading files`;
+    if (s.toolDensity > 5) return `${density} tools/turn average — lots of retries or exploration`;
+    if (cachePct < 10) return `${cachePct}% cache reuse — context rebuilt repeatedly`;
+    return `Low efficiency score across output, cache, and tool usage`;
+  }
+}
+
+function renderBestWorst(data) {
+  const eligible = data.sessions.filter(s => s.queryCount >= 3);
+  if (eligible.length < 2) {
+    $('#bestWorstGrid').innerHTML = '<p class="text-muted" style="grid-column:1/-1">Not enough sessions yet (need at least 2 with 3+ turns).</p>';
+    return;
+  }
+
+  const scored = eligible.map(s => ({ ...s, score: scoreSession(s) }));
+  scored.sort((a, b) => b.score - a.score);
+
+  const best = scored.slice(0, 3);
+  const worst = scored.slice(-3).reverse();
+
+  function card(s, type, rank) {
+    const outputPct = s.totalTokens > 0 ? (s.outputTokens / s.totalTokens * 100).toFixed(0) : 0;
+    const cachePct = s.totalTokens > 0 ? (s.cacheReadTokens / s.totalTokens * 100).toFixed(0) : 0;
+    const isBest = type === 'best';
+    return `<div class="bw-card ${type}">
+      <div class="bw-badge ${type}">${isBest ? '★' : '✕'} ${type === 'best' ? 'Best' : 'Worst'} #${rank}</div>
+      <div class="bw-prompt" title="${escapeHtml(s.firstPrompt)}">${escapeHtml(s.firstPrompt)}</div>
+      <div class="bw-meta">${s.date} · ${escapeHtml(shortModel(s.model))} · ${fmt(s.totalTokens)} tokens</div>
+      <div class="bw-stats">
+        <div class="bw-stat"><span class="val">${outputPct}%</span><span class="lbl">output ratio</span></div>
+        <div class="bw-stat"><span class="val">${cachePct}%</span><span class="lbl">cache reuse</span></div>
+        <div class="bw-stat"><span class="val">${s.toolDensity.toFixed(1)}</span><span class="lbl">tools/turn</span></div>
+        <div class="bw-stat"><span class="val">${s.queryCount}</span><span class="lbl">turns</span></div>
+      </div>
+      <div class="bw-reason">${escapeHtml(sessionReason(s, isBest))}</div>
+    </div>`;
+  }
+
+  let html = `<div>
+    <div class="bw-column-title" style="color:var(--green)">Most Efficient</div>
+    ${best.map((s, i) => card(s, 'best', i + 1)).join('')}
+  </div>
+  <div>
+    <div class="bw-column-title" style="color:var(--red)">Least Efficient</div>
+    ${worst.map((s, i) => card(s, 'worst', i + 1)).join('')}
+  </div>`;
+
+  $('#bestWorstGrid').innerHTML = html;
 }
 
 function renderSessions(data) {
