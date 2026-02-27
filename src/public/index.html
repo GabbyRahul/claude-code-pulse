@@ -363,8 +363,9 @@
   .tab-content.active { display: block; }
 
   /* Best & Worst Sessions */
-  .best-worst-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 4px; }
-  @media (max-width: 600px) { .best-worst-grid { grid-template-columns: 1fr; } }
+  .best-worst-grid { display: flex; flex-direction: column; gap: 20px; }
+  .bw-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 700px) { .bw-row { grid-template-columns: 1fr; } }
   .bw-column-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
   .bw-card {
     background: var(--bg);
@@ -372,7 +373,6 @@
     border-left: 3px solid;
     border-radius: var(--radius);
     padding: 14px;
-    margin-bottom: 8px;
   }
   .bw-card.best { border-left-color: var(--green); }
   .bw-card.worst { border-left-color: var(--red); }
@@ -381,7 +381,7 @@
   .bw-badge.worst { color: var(--red); }
   .bw-prompt { font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bw-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
-  .bw-stats { display: flex; gap: 14px; font-size: 11px; font-family: var(--mono); flex-wrap: wrap; }
+  .bw-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-size: 11px; font-family: var(--mono); }
   .bw-stat { display: flex; flex-direction: column; gap: 1px; }
   .bw-stat .val { color: var(--text); font-weight: 600; }
   .bw-stat .lbl { color: var(--text-dim); }
@@ -803,11 +803,11 @@ function renderBestWorst(data) {
 
   let html = `<div>
     <div class="bw-column-title" style="color:var(--green)">Most Efficient</div>
-    ${best.map((s, i) => card(s, 'best', i + 1)).join('')}
+    <div class="bw-row">${best.map((s, i) => card(s, 'best', i + 1)).join('')}</div>
   </div>
   <div>
     <div class="bw-column-title" style="color:var(--red)">Least Efficient</div>
-    ${worst.map((s, i) => card(s, 'worst', i + 1)).join('')}
+    <div class="bw-row">${worst.map((s, i) => card(s, 'worst', i + 1)).join('')}</div>
   </div>`;
 
   $('#bestWorstGrid').innerHTML = html;
