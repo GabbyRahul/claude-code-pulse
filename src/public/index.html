@@ -364,7 +364,7 @@
 
   /* Best & Worst Sessions */
   .best-worst-grid { display: flex; flex-direction: column; gap: 20px; }
-  .bw-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .bw-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   @media (max-width: 700px) { .bw-row { grid-template-columns: 1fr; } }
   .bw-column-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
   .bw-card {
@@ -381,7 +381,7 @@
   .bw-badge.worst { color: var(--red); }
   .bw-prompt { font-size: 13px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bw-meta { font-size: 11px; color: var(--text-dim); margin-bottom: 8px; }
-  .bw-stats { display: flex; flex-wrap: nowrap; gap: 12px; font-size: 11px; font-family: var(--mono); }
+  .bw-stats { display: flex; flex-wrap: nowrap; gap: 12px; font-size: 11px; font-family: var(--mono); overflow: hidden; }
   .bw-stat { display: flex; gap: 4px; align-items: baseline; white-space: nowrap; }
   .bw-stat .val { color: var(--text); font-weight: 600; }
   .bw-stat .lbl { color: var(--text-dim); }
