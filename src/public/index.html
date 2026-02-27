@@ -386,6 +386,31 @@
   .bw-stat .val { color: var(--text); font-weight: 600; }
   .bw-stat .lbl { color: var(--text-dim); }
   .bw-reason { font-size: 11px; color: var(--text-muted); margin-top: 8px; font-style: italic; }
+  .bw-card { transition: background 0.15s, box-shadow 0.15s; }
+  .bw-card:hover { background: var(--bg-hover); box-shadow: 0 0 0 1px var(--border); }
+
+  /* Modal */
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:100; display:flex; align-items:center; justify-content:center; opacity:0; pointer-events:none; transition:opacity 0.2s; }
+  .modal-overlay.open { opacity:1; pointer-events:all; }
+  .modal { background:var(--bg-card); border:1px solid var(--border); border-radius:12px; width:min(680px,95vw); max-height:85vh; overflow-y:auto; padding:28px; position:relative; transform:translateY(20px); transition:transform 0.2s; }
+  .modal-overlay.open .modal { transform:translateY(0); }
+  .modal-close { position:absolute; top:14px; right:16px; background:none; border:none; color:var(--text-muted); font-size:20px; cursor:pointer; line-height:1; padding:4px 8px; border-radius:4px; }
+  .modal-close:hover { color:var(--text); background:var(--bg-hover); }
+  .modal-title { font-size:15px; font-weight:600; padding-right:40px; line-height:1.4; margin-bottom:6px; }
+  .modal-subtitle { font-size:12px; color:var(--text-muted); font-family:var(--mono); margin-bottom:14px; }
+  .modal-chips { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0; }
+  .modal-chip { background:var(--bg); border:1px solid var(--border); border-radius:20px; padding:4px 12px; font-size:12px; font-family:var(--mono); }
+  .modal-chip .chip-label { color:var(--text-dim); margin-right:4px; }
+  .modal-section-title { font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); margin-bottom:8px; }
+  .token-bar { display:flex; height:10px; border-radius:5px; overflow:hidden; margin:10px 0 6px; }
+  .token-bar-labels { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px; }
+  .token-bar-label { font-size:11px; font-family:var(--mono); display:flex; align-items:center; gap:4px; color:var(--text-muted); }
+  .token-bar-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+  .modal-insights { list-style:none; display:flex; flex-direction:column; gap:6px; margin-top:4px; }
+  .modal-insights li { font-size:13px; color:var(--text-muted); padding:10px 14px; background:var(--bg); border-radius:var(--radius); border-left:3px solid var(--border); }
+  .modal-rank-banner { padding:8px 14px; border-radius:var(--radius); font-size:13px; font-weight:600; margin-bottom:16px; }
+  .modal-rank-banner.best { background:rgba(63,185,80,0.1); color:var(--green); border:1px solid rgba(63,185,80,0.3); }
+  .modal-rank-banner.worst { background:rgba(248,81,73,0.1); color:var(--red); border:1px solid rgba(248,81,73,0.3); }
 </style>
 </head>
 <body>
@@ -483,6 +508,13 @@
     <p>claude-code-pulse needs JavaScript to render the dashboard.</p>
   </div>
 </noscript>
+
+<div class="modal-overlay" id="sessionModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal" id="modalBox">
+    <button class="modal-close" id="modalClose" aria-label="Close">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
 
 <script>
 const $ = (sel) => document.querySelector(sel);
@@ -787,7 +819,9 @@ function renderBestWorst(data) {
     const outputPct = s.totalTokens > 0 ? (s.outputTokens / s.totalTokens * 100).toFixed(0) : 0;
     const cachePct = s.totalTokens > 0 ? (s.cacheReadTokens / s.totalTokens * 100).toFixed(0) : 0;
     const isBest = type === 'best';
-    return `<div class="bw-card ${type}">
+    return `<div class="bw-card ${type}" style="cursor:pointer" tabindex="0" role="button"
+        onclick="openSessionModal('${escapeHtml(s.sessionId)}', {type:'${type}',rank:${rank}})"
+        onkeydown="if(event.key==='Enter'||event.key===' ')openSessionModal('${escapeHtml(s.sessionId)}',{type:'${type}',rank:${rank}})">
       <div class="bw-badge ${type}">${isBest ? '★' : '✕'} ${type === 'best' ? 'Best' : 'Worst'} #${rank}</div>
       <div class="bw-prompt" title="${escapeHtml(s.firstPrompt)}">${escapeHtml(s.firstPrompt)}</div>
       <div class="bw-meta">${s.date} · ${escapeHtml(shortModel(s.model))} · ${fmt(s.totalTokens)} tokens</div>
@@ -819,7 +853,7 @@ function renderSessions(data) {
     <thead><tr><th>Prompt</th><th>Date</th><th>Model</th><th class="text-right">Tokens</th><th class="text-right">Turns</th></tr></thead>
     <tbody>`;
   for (const s of top50) {
-    html += `<tr>
+    html += `<tr style="cursor:pointer" onclick="openSessionModal('${escapeHtml(s.sessionId)}')">
       <td class="truncate" title="${escapeHtml(s.firstPrompt)}">${escapeHtml(s.firstPrompt)}</td>
       <td class="mono text-muted">${s.date}</td>
       <td class="mono text-muted">${escapeHtml(shortModel(s.model))}</td>
@@ -885,6 +919,101 @@ function renderOptimizations(data) {
 $('#refreshBtn').addEventListener('click', () => render(true));
 
 // Init
+// ── Session Modal ────────────────────────────────────────────────────────────
+
+function decodeProject(p) {
+  // Leading '-' means root '/'; then '-' separates path segments
+  if (!p) return p;
+  return p.replace(/^-/, '/').replace(/-/g, '/');
+}
+
+function openSessionModal(sessionId, rankInfo) {
+  const s = (window._data.sessions || []).find(x => x.sessionId === sessionId);
+  if (!s) return;
+
+  const total = s.totalTokens || 1;
+  const outputPct = (s.outputTokens / total * 100).toFixed(1);
+  const cachePct  = (s.cacheReadTokens / total * 100).toFixed(1);
+  const inputPct  = (s.inputTokens / total * 100).toFixed(1);
+  const createPct = (s.cacheCreationTokens / total * 100).toFixed(1);
+
+  // Token bar widths
+  const iW = Math.max(0, s.inputTokens / total * 100);
+  const cW = Math.max(0, s.cacheCreationTokens / total * 100);
+  const rW = Math.max(0, s.cacheReadTokens / total * 100);
+  const oW = Math.max(0, s.outputTokens / total * 100);
+
+  // Insights
+  const insights = [];
+  const cacheHit = s.totalTokens > 0 ? s.cacheReadTokens / s.totalTokens : 0;
+  if (cacheHit > 0.7) insights.push(`${(cacheHit*100).toFixed(0)}% of tokens were served from cache — excellent context reuse`);
+  else if (cacheHit > 0.3) insights.push(`${(cacheHit*100).toFixed(0)}% cache hit rate — decent reuse, more /compact could help`);
+  else insights.push('Low cache reuse — starting fresh each turn. Longer sessions save tokens');
+
+  const outRatio = s.totalTokens > 0 ? s.outputTokens / s.totalTokens : 0;
+  if (outRatio < 0.05) insights.push(`Only ${outputPct}% output ratio — Claude spent most tokens reading context, not writing`);
+  else if (outRatio > 0.4) insights.push(`${outputPct}% output ratio — Claude wrote a lot this session`);
+
+  if (s.thinkingTurns > 0) insights.push(`Extended thinking used in ${s.thinkingTurns} of ${s.queryCount} turns`);
+  insights.push(`${s.totalToolCalls} tool calls across ${s.queryCount} turns (${s.toolDensity.toFixed(1)}/turn avg)`);
+  if (s.cost > 0) insights.push(`~$${s.cost.toFixed(4)} API-equivalent cost (not your subscription cost)`);
+
+  // Rank banner
+  let rankBanner = '';
+  if (rankInfo) {
+    const label = rankInfo.type === 'best'
+      ? `★ Ranked #${rankInfo.rank} most efficient session`
+      : `✕ Ranked #${rankInfo.rank} least efficient session`;
+    rankBanner = `<div class="modal-rank-banner ${rankInfo.type}">${label}</div>`;
+  }
+
+  const projectDecoded = decodeProject(s.project);
+
+  document.getElementById('modalContent').innerHTML = `
+    ${rankBanner}
+    <div class="modal-title" id="modalTitle">${escapeHtml(s.firstPrompt)}</div>
+    <div class="modal-subtitle">${escapeHtml(projectDecoded)} &nbsp;·&nbsp; ${s.date} &nbsp;·&nbsp; ${escapeHtml(shortModel(s.model))}</div>
+
+    <div class="modal-chips">
+      <div class="modal-chip"><span class="chip-label">Total</span>${fmt(s.totalTokens)} tokens</div>
+      <div class="modal-chip"><span class="chip-label">Output ratio</span>${outputPct}%</div>
+      <div class="modal-chip"><span class="chip-label">Cache reuse</span>${cachePct}%</div>
+      <div class="modal-chip"><span class="chip-label">Tools/turn</span>${s.toolDensity.toFixed(1)}</div>
+    </div>
+
+    <div class="modal-section-title">Token breakdown</div>
+    <div class="token-bar">
+      <div class="token-bar-seg" style="width:${iW}%;background:#58a6ff"></div>
+      <div class="token-bar-seg" style="width:${cW}%;background:#bc8cff"></div>
+      <div class="token-bar-seg" style="width:${rW}%;background:#6e48a0"></div>
+      <div class="token-bar-seg" style="width:${oW}%;background:#39d2c0"></div>
+    </div>
+    <div class="token-bar-labels">
+      <span class="token-bar-label"><span class="token-bar-dot" style="background:#58a6ff"></span>Input ${fmt(s.inputTokens)} (${inputPct}%)</span>
+      <span class="token-bar-label"><span class="token-bar-dot" style="background:#bc8cff"></span>Cache write ${fmt(s.cacheCreationTokens)} (${createPct}%)</span>
+      <span class="token-bar-label"><span class="token-bar-dot" style="background:#6e48a0"></span>Cache read ${fmt(s.cacheReadTokens)} (${cachePct}%)</span>
+      <span class="token-bar-label"><span class="token-bar-dot" style="background:#39d2c0"></span>Output ${fmt(s.outputTokens)} (${outputPct}%)</span>
+    </div>
+
+    <div class="modal-section-title">Session insights</div>
+    <ul class="modal-insights">${insights.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+  `;
+
+  document.getElementById('sessionModal').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('sessionModal').classList.remove('open');
+}
+
+document.getElementById('modalClose').addEventListener('click', closeModal);
+document.getElementById('sessionModal').addEventListener('click', e => {
+  if (!document.getElementById('modalBox').contains(e.target)) closeModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 render();
 </script>
 </body>
