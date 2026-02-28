@@ -760,8 +760,8 @@ function deltaHtml(pct) {
 
 function renderStats(data) {
   const t = data.totals;
-  const tokenDelta = weekDelta(data.dailyUsage, 'totalTokens');
-  const sessionDelta = weekDelta(data.dailyUsage, 'sessions');
+  const tokenDelta = weekDelta((window._data || data).dailyUsage, 'totalTokens');
+  const sessionDelta = weekDelta((window._data || data).dailyUsage, 'sessions');
   const cards = [
     { label: 'Total Tokens', value: fmt(t.totalTokens), sub: `${fmt(t.totalInput)} input + ${fmt(t.totalCacheCreation + t.totalCacheRead)} cached + ${fmt(t.totalOutput)} output`, delta: deltaHtml(tokenDelta) },
     { label: 'Sessions', value: t.totalSessions, sub: `${t.totalQueries} total turns`, delta: deltaHtml(sessionDelta) },
@@ -867,22 +867,6 @@ function renderHeatmap(data) {
 
   const container = $('#heatmapContainer');
   container.innerHTML = html;
-
-  // Wire up JS floating tooltip
-  const tip = document.getElementById('heatmapTooltip');
-  container.addEventListener('mouseover', e => {
-    const cell = e.target.closest('[data-tip]');
-    if (!cell) return;
-    tip.textContent = cell.dataset.tip;
-    tip.style.opacity = '1';
-  });
-  container.addEventListener('mousemove', e => {
-    tip.style.left = (e.clientX + 14) + 'px';
-    tip.style.top = (e.clientY - 36) + 'px';
-  });
-  container.addEventListener('mouseleave', () => {
-    tip.style.opacity = '0';
-  });
 }
 
 let dailyChartInstance = null;
@@ -1066,7 +1050,7 @@ function renderTopPrompts(data) {
     </tr></thead>
     <tbody>`;
   for (const p of prompts) {
-    html += `<tr style="cursor:pointer" onclick="openSessionModal('${escapeHtml(p.sessionId)}')">
+    html += `<tr style="cursor:pointer" data-session-id="${escapeHtml(p.sessionId)}">
       <td class="truncate" title="${escapeHtml(p.prompt)}">${escapeHtml(p.prompt)}</td>
       <td class="mono text-muted">${p.date}</td>
       <td class="mono text-muted">${escapeHtml(shortModel(p.model))}</td>
@@ -1079,6 +1063,11 @@ function renderTopPrompts(data) {
 
   const container = $('#promptsTable');
   container.innerHTML = html;
+
+  container.querySelector('tbody').addEventListener('click', e => {
+    const row = e.target.closest('tr[data-session-id]');
+    if (row) openSessionModal(row.dataset.sessionId);
+  });
 
   container.querySelector('thead').addEventListener('click', e => {
     const th = e.target.closest('th[data-col]');
@@ -1112,8 +1101,7 @@ function renderBestWorst(data) {
     const cachePct = s.totalTokens > 0 ? (s.cacheReadTokens / s.totalTokens * 100).toFixed(0) : 0;
     const isBest = type === 'best';
     return `<div class="bw-card ${type}" style="cursor:pointer" tabindex="0" role="button"
-        onclick="openSessionModal('${escapeHtml(s.sessionId)}', {type:'${type}',rank:${rank}})"
-        onkeydown="if(event.key==='Enter'||event.key===' ')openSessionModal('${escapeHtml(s.sessionId)}',{type:'${type}',rank:${rank}})">
+        data-session-id="${escapeHtml(s.sessionId)}">
       <div class="bw-badge ${type}">${isBest ? '★' : '✕'} ${type === 'best' ? 'Best' : 'Worst'} #${rank}</div>
       <div class="bw-prompt" title="${escapeHtml(s.firstPrompt)}">${escapeHtml(s.firstPrompt)}</div>
       <div class="bw-meta">${s.date} · ${escapeHtml(shortModel(s.model))} · ${fmt(s.totalTokens)} tokens</div>
@@ -1136,7 +1124,19 @@ function renderBestWorst(data) {
     <div class="bw-row">${worst.map((s, i) => card(s, 'worst', i + 1)).join('')}</div>
   </div>`;
 
-  $('#bestWorstGrid').innerHTML = html;
+  const grid = $('#bestWorstGrid');
+  grid.innerHTML = html;
+
+  grid.addEventListener('click', e => {
+    const card = e.target.closest('[data-session-id]');
+    if (card) openSessionModal(card.dataset.sessionId);
+  });
+  grid.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      const card = e.target.closest('[data-session-id]');
+      if (card) openSessionModal(card.dataset.sessionId);
+    }
+  });
 }
 
 function renderSessions(data) {
@@ -1178,7 +1178,7 @@ function renderSessions(data) {
       const color = score >= 0.5 ? 'var(--green)' : score >= 0.25 ? 'var(--orange)' : 'var(--red)';
       effCell = `<td class="mono text-right" style="color:${color}" title="${effTitle}">${score.toFixed(2)}</td>`;
     }
-    html += `<tr style="cursor:pointer" onclick="openSessionModal('${escapeHtml(s.sessionId)}')">
+    html += `<tr style="cursor:pointer" data-session-id="${escapeHtml(s.sessionId)}">
       <td class="truncate" title="${escapeHtml(s.firstPrompt)}">${escapeHtml(s.firstPrompt)}</td>
       <td class="mono text-muted">${s.date}</td>
       <td class="mono text-muted">${escapeHtml(shortModel(s.model))}</td>
@@ -1194,6 +1194,11 @@ function renderSessions(data) {
   const container = $('#sessionsTable');
   container.innerHTML = html;
 
+  container.querySelector('tbody').addEventListener('click', e => {
+    const row = e.target.closest('tr[data-session-id]');
+    if (row) openSessionModal(row.dataset.sessionId);
+  });
+
   // Sort header click handler
   container.querySelector('thead').addEventListener('click', e => {
     const th = e.target.closest('th[data-col]');
@@ -1205,7 +1210,7 @@ function renderSessions(data) {
       sessionSort.col = c;
       sessionSort.dir = 'desc';
     }
-    renderSessions(window._data);
+    renderSessions(getFilteredData(window._data));
   });
 }
 
@@ -1256,6 +1261,32 @@ function renderOptimizations(data) {
   $('#optimizations').innerHTML = html;
 }
 
+// Heatmap tooltip — wired up once to avoid listener accumulation on re-render
+(function initHeatmapTooltip() {
+  const container = $('#heatmapContainer');
+  const tip = document.getElementById('heatmapTooltip');
+  container.addEventListener('mouseover', e => {
+    const cell = e.target.closest('[data-tip]');
+    if (!cell) { tip.style.opacity = '0'; return; }
+    tip.textContent = cell.dataset.tip;
+    tip.style.opacity = '1';
+  });
+  container.addEventListener('mousemove', e => {
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top = (e.clientY - 36) + 'px';
+  });
+  container.addEventListener('mouseleave', () => {
+    tip.style.opacity = '0';
+  });
+})();
+
+// Heartbeat — tells server the tab is still open; server shuts down 5 min after last heartbeat
+(function startHeartbeat() {
+  function beat() { fetch('/api/heartbeat', { method: 'POST' }).catch(() => {}); }
+  beat();
+  setInterval(beat, 30 * 1000);
+})();
+
 // Refresh
 $('#refreshBtn').addEventListener('click', () => render(true));
 
@@ -1268,9 +1299,8 @@ $('#stopBtn').addEventListener('click', async () => {
   try {
     await fetch('/api/shutdown', { method: 'POST' });
   } catch (_) {}
+  document.body.innerHTML = '<div style="padding:2rem;font-family:monospace;">Server stopped. You can close this tab.</div>';
   window.close();
-  // fallback if window.close() is blocked by the browser
-  setTimeout(() => { window.location.href = 'about:blank'; }, 300);
 });
 
 // Init
