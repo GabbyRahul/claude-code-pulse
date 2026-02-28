@@ -22,6 +22,11 @@ function createServer() {
 
   let cachedData = null;
 
+  app.post('/api/shutdown', (req, res) => {
+    res.json({ ok: true });
+    setImmediate(() => process.exit(0));
+  });
+
   app.get('/api/usage', async (req, res) => {
     try {
       const forceRefresh = req.query.refresh === 'true';
