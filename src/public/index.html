@@ -166,24 +166,21 @@
   [data-theme="light"] .heatmap-cell[data-level="3"] { background: #30a14e; }
   [data-theme="light"] .heatmap-cell[data-level="4"] { background: #216e39; }
 
-  .heatmap-tooltip {
-    position: absolute;
-    bottom: 22px;
-    left: 50%;
-    transform: translateX(-50%);
+  #heatmapTooltip {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
     background: var(--text);
     color: var(--bg);
     padding: 4px 8px;
     border-radius: 4px;
     font-size: 11px;
     white-space: nowrap;
-    pointer-events: none;
     opacity: 0;
     transition: opacity 0.15s;
-    z-index: 10;
   }
-  .heatmap-cell:hover .heatmap-tooltip { opacity: 1; }
   .heatmap-labels {
+    width: 30px;
     display: inline-grid;
     grid-template-rows: repeat(7, 14px);
     gap: 3px;
@@ -245,6 +242,9 @@
     user-select: none;
   }
   th:hover { color: var(--text); }
+  th.sortable { cursor: pointer; user-select: none; }
+  .sort-icon { font-size: 10px; color: var(--text-dim); margin-left: 3px; }
+  .sort-icon.active { color: var(--accent); }
   td {
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
@@ -414,6 +414,7 @@
 </style>
 </head>
 <body>
+<div id="heatmapTooltip"></div>
 <div class="container">
   <div id="loading" class="loading">
     <div class="loading-spinner"></div>
@@ -567,6 +568,8 @@ function shortProject(p) {
   return parts.slice(-2).join('/') || p;
 }
 
+let sessionSort = { col: 'tokens', dir: 'desc' };
+
 // Fetch data
 async function loadData(refresh = false) {
   const url = '/api/usage' + (refresh ? '?refresh=true' : '');
@@ -647,29 +650,57 @@ function renderHeatmap(data) {
     return 4;
   }
 
-  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-  // Pad to start on Sunday
-  const firstDay = days[0].dayOfWeek;
+  // Pad to start on Monday (Mon=0 … Sun=6)
+  const firstDay = (days[0].dayOfWeek + 6) % 7;
   const padded = Array(firstDay).fill(null).concat(days);
 
+  // Build columns (each column = 7 cells = one week)
+  const cols = [];
+  for (let c = 0; c < Math.ceil(padded.length / 7); c++) {
+    cols.push(padded.slice(c * 7, c * 7 + 7));
+  }
+
+  // Build month label row — show month name at first col of each new month
+  let prevMonth = -1;
+  let monthHtml = '';
+  for (const col of cols) {
+    const firstReal = col.find(d => d !== null);
+    const month = firstReal ? new Date(firstReal.date).getUTCMonth() : -1;
+    if (firstReal && month !== prevMonth) {
+      monthHtml += `<span style="display:inline-block;width:17px;overflow:visible;font-size:10px;color:var(--text-dim);line-height:16px;">${monthNames[month]}</span>`;
+      prevMonth = month;
+    } else {
+      monthHtml += `<span style="display:inline-block;width:17px;"></span>`;
+    }
+  }
+
   let html = '<div style="display:flex;align-items:flex-start;">';
+  // Left: day-label spacer (30px) + labels
   html += '<div class="heatmap-labels">';
+  html += '<div style="height:20px;"></div>';
   for (let i = 0; i < 7; i++) {
-    html += `<span>${i % 2 === 1 ? dayLabels[i] : ''}</span>`;
+    html += `<span>${dayLabels[i]}</span>`;
   }
   html += '</div>';
+  // Right: month labels row stacked above grid
+  html += '<div style="display:flex;flex-direction:column;">';
+  html += `<div style="display:flex;margin-bottom:4px;">${monthHtml}</div>`;
   html += '<div class="heatmap-grid">';
   for (const d of padded) {
     if (!d) {
       html += '<div style="width:14px;height:14px;"></div>';
     } else {
-      html += `<div class="heatmap-cell" data-level="${level(d.tokens)}">
-        <div class="heatmap-tooltip">${d.date}: ${fmt(d.tokens)} tokens</div>
-      </div>`;
+      const [y, m, day] = d.date.split('-');
+      const fmtDate = `${day}-${m}-${y}`;
+      html += `<div class="heatmap-cell" data-level="${level(d.tokens)}" data-tip="${fmtDate}: ${fmt(d.tokens)} tokens"></div>`;
     }
   }
-  html += '</div></div>';
+  html += '</div>';
+  html += '</div>';
+  html += '</div>';
 
   // Legend
   html += `<div class="heatmap-legend">
@@ -682,7 +713,24 @@ function renderHeatmap(data) {
     <span>More</span>
   </div>`;
 
-  $('#heatmapContainer').innerHTML = html;
+  const container = $('#heatmapContainer');
+  container.innerHTML = html;
+
+  // Wire up JS floating tooltip
+  const tip = document.getElementById('heatmapTooltip');
+  container.addEventListener('mouseover', e => {
+    const cell = e.target.closest('[data-tip]');
+    if (!cell) return;
+    tip.textContent = cell.dataset.tip;
+    tip.style.opacity = '1';
+  });
+  container.addEventListener('mousemove', e => {
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top = (e.clientY - 36) + 'px';
+  });
+  container.addEventListener('mouseleave', () => {
+    tip.style.opacity = '0';
+  });
 }
 
 let dailyChartInstance = null;
@@ -848,9 +896,30 @@ function renderBestWorst(data) {
 }
 
 function renderSessions(data) {
-  const top50 = data.sessions.slice(0, 50);
+  const sessions = [...(data.sessions || [])];
+  const { col, dir } = sessionSort;
+  sessions.sort((a, b) => {
+    let av, bv;
+    if (col === 'date')   { av = a.date; bv = b.date; return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av); }
+    if (col === 'tokens') { av = a.totalTokens; bv = b.totalTokens; }
+    if (col === 'turns')  { av = a.queryCount;  bv = b.queryCount;  }
+    return dir === 'asc' ? av - bv : bv - av;
+  });
+  const top50 = sessions.slice(0, 50);
+
+  function sortIcon(c) {
+    if (c !== col) return `<span class="sort-icon">↕</span>`;
+    return `<span class="sort-icon active">${dir === 'asc' ? '↑' : '↓'}</span>`;
+  }
+
   let html = `<table>
-    <thead><tr><th>Prompt</th><th>Date</th><th>Model</th><th class="text-right">Tokens</th><th class="text-right">Turns</th></tr></thead>
+    <thead><tr>
+      <th>Prompt</th>
+      <th class="sortable" data-col="date">Date ${sortIcon('date')}</th>
+      <th>Model</th>
+      <th class="sortable text-right" data-col="tokens">Tokens ${sortIcon('tokens')}</th>
+      <th class="sortable text-right" data-col="turns">Turns ${sortIcon('turns')}</th>
+    </tr></thead>
     <tbody>`;
   for (const s of top50) {
     html += `<tr style="cursor:pointer" onclick="openSessionModal('${escapeHtml(s.sessionId)}')">
@@ -863,9 +932,24 @@ function renderSessions(data) {
   }
   html += '</tbody></table>';
   if (data.sessions.length > 50) {
-    html += `<div class="text-muted" style="margin-top:8px;font-size:12px;">Showing top 50 of ${data.sessions.length} sessions</div>`;
+    html += `<div class="text-muted" style="margin-top:8px;font-size:12px;">Showing top 50 of ${data.sessions.length} sessions by ${col}</div>`;
   }
-  $('#sessionsTable').innerHTML = html;
+  const container = $('#sessionsTable');
+  container.innerHTML = html;
+
+  // Sort header click handler
+  container.querySelector('thead').addEventListener('click', e => {
+    const th = e.target.closest('th[data-col]');
+    if (!th) return;
+    const c = th.dataset.col;
+    if (sessionSort.col === c) {
+      sessionSort.dir = sessionSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sessionSort.col = c;
+      sessionSort.dir = 'desc';
+    }
+    renderSessions(window._data);
+  });
 }
 
 function renderTools(data) {
