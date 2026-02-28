@@ -62,7 +62,7 @@ function createServer() {
   // Auto-shutdown watchdog: fires every 60s
   // - Tab closed: no heartbeat for 5 min (browsers throttle background timers to ~60s)
   // - Inactivity: no API call for 1 hour
-  const HEARTBEAT_TIMEOUT_MS = 3 * 60 * 1000;
+  const HEARTBEAT_TIMEOUT_MS = 4 * 60 * 1000;
   const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 
   setInterval(() => {
