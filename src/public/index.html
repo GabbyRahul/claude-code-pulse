@@ -1063,24 +1063,6 @@ function renderTopPrompts(data) {
 
   const container = $('#promptsTable');
   container.innerHTML = html;
-
-  container.querySelector('tbody').addEventListener('click', e => {
-    const row = e.target.closest('tr[data-session-id]');
-    if (row) openSessionModal(row.dataset.sessionId);
-  });
-
-  container.querySelector('thead').addEventListener('click', e => {
-    const th = e.target.closest('th[data-col]');
-    if (!th) return;
-    const c = th.dataset.col;
-    if (promptSort.col === c) {
-      promptSort.dir = promptSort.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      promptSort.col = c;
-      promptSort.dir = 'desc';
-    }
-    renderTopPrompts(getFilteredData(window._data));
-  });
 }
 
 function renderBestWorst(data) {
@@ -1193,25 +1175,6 @@ function renderSessions(data) {
   }
   const container = $('#sessionsTable');
   container.innerHTML = html;
-
-  container.querySelector('tbody').addEventListener('click', e => {
-    const row = e.target.closest('tr[data-session-id]');
-    if (row) openSessionModal(row.dataset.sessionId);
-  });
-
-  // Sort header click handler
-  container.querySelector('thead').addEventListener('click', e => {
-    const th = e.target.closest('th[data-col]');
-    if (!th) return;
-    const c = th.dataset.col;
-    if (sessionSort.col === c) {
-      sessionSort.dir = sessionSort.dir === 'asc' ? 'desc' : 'asc';
-    } else {
-      sessionSort.col = c;
-      sessionSort.dir = 'desc';
-    }
-    renderSessions(getFilteredData(window._data));
-  });
 }
 
 function renderTools(data) {
@@ -1277,6 +1240,48 @@ function renderOptimizations(data) {
   });
   container.addEventListener('mouseleave', () => {
     tip.style.opacity = '0';
+  });
+})();
+
+// Sessions table — wired up once to avoid listener accumulation on re-render
+(function initSessionsTable() {
+  const container = $('#sessionsTable');
+  container.addEventListener('click', e => {
+    const th = e.target.closest('th[data-col]');
+    if (th) {
+      const c = th.dataset.col;
+      if (sessionSort.col === c) {
+        sessionSort.dir = sessionSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sessionSort.col = c;
+        sessionSort.dir = 'desc';
+      }
+      renderSessions(getFilteredData(window._data));
+      return;
+    }
+    const row = e.target.closest('tr[data-session-id]');
+    if (row) openSessionModal(row.dataset.sessionId);
+  });
+})();
+
+// Prompts table — wired up once to avoid listener accumulation on re-render
+(function initPromptsTable() {
+  const container = $('#promptsTable');
+  container.addEventListener('click', e => {
+    const th = e.target.closest('th[data-col]');
+    if (th) {
+      const c = th.dataset.col;
+      if (promptSort.col === c) {
+        promptSort.dir = promptSort.dir === 'asc' ? 'desc' : 'asc';
+      } else {
+        promptSort.col = c;
+        promptSort.dir = 'desc';
+      }
+      renderTopPrompts(getFilteredData(window._data));
+      return;
+    }
+    const row = e.target.closest('tr[data-session-id]');
+    if (row) openSessionModal(row.dataset.sessionId);
   });
 })();
 
